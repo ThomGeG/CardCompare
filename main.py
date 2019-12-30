@@ -11,10 +11,10 @@ import requests
 from GoodGamesParser import GoodGamesParser
 
 # define some API endpoints
-SCRYFALL_API = "https://api.scryfall.com/cards/named"
-CURRENCY_API = "https://api.exchangeratesapi.io/latest"
-GOODGAMES_API = "https://tcg.goodgames.com.au/catalogsearch/advanced/result/"
-DECKBOX_API = "https://deckbox-api.herokuapp.com/api/users/%s/wishlist" % args.account_name
+SCRYFALL_API    = "https://api.scryfall.com/cards/"
+CURRENCY_API    = "https://api.exchangeratesapi.io/latest"
+GOODGAMES_API   = "https://tcg.goodgames.com.au/catalogsearch/advanced/result/"
+DECKBOX_API     = "https://deckbox-api.herokuapp.com/api/users/%s/wishlist" % args.account_name
 
 # define the conversion rate of USD -> AUD
 CONVERSION_RATE = requests.get(CURRENCY_API, params={"base" : "USD"}).json()["rates"]["AUD"]
@@ -26,46 +26,50 @@ WISHLIST_CARDS = []
 for i in range(requests.get(DECKBOX_API).json()["total_pages"]):
     wishlist_page = requests.get(DECKBOX_API, params={"page": i+1}).json()
     for card in wishlist_page["items"]:
-        WISHLIST_CARDS.append(card)
+        WISHLIST_CARDS.append({"name": card["name"]})
 
 # fetch pricing data from scryfall and good games
 for card in WISHLIST_CARDS:
+
+    print("Fetching: %s" % card["name"])
+
     # fetch scryfall data
-    scryfall_card = requests.get(SCRYFALL_API, params={"exact" : card["name"]}).json()
+    oracle_id = requests.get(SCRYFALL_API + "named", params={"exact" : card["name"]}).json()["oracle_id"]
+    scryfall_cards = requests.get(SCRYFALL_API + "search", params={"q" : "oracleid:" + oracle_id, "order" : "usd", "unique" : "prints"}).json()["data"]
 
-    # convert usd into aud
-    if scryfall_card["prices"]["usd"] is not None:
-        scryfall_card["prices"]["aud"] = str(round(float(scryfall_card["prices"]["usd"]) * CONVERSION_RATE, 2))
-    else:
-        scryfall_card["prices"]["aud"] = None
+    # do some post-processing
+    multiverse_ids = [id for sublist in [card["multiverse_ids"] for card in scryfall_cards] for id in sublist]
+    scryfall_prices = [round(float(scryfall_card["prices"]["usd"]) * CONVERSION_RATE, 2) for scryfall_card in scryfall_cards if scryfall_card["prices"]["usd"] is not None]
 
-    # add pricing data to WISHLIST_CARDS
-    card["prices"] = {"tcgplayer" : scryfall_card["prices"]}
-    card["multiverse_ids"] = scryfall_card["multiverse_ids"]
+    if args.verbose:
+        print("\tFound:\t\t%s" % oracle_id)
+        print("\tPrintings:\t%s" % multiverse_ids)
+        print("\tPrices:\t\t%s" % scryfall_prices)
 
     # fetch good games data
     parser = GoodGamesParser()
-    params = urllib.parse.urlencode({"mtg_multiverseid" : card["multiverse_ids"][0]})
-    parser.feed(urllib.request.urlopen(GOODGAMES_API + "?%s" % params).read().decode("utf-8"))
-    card["prices"]["goodgames"] = {
-        "aud": parser.price,
-        "usd": round(float(parser.price) / CONVERSION_RATE, 2) if parser.price is not None else None,
-        "instock": parser.is_instock
+    for multiverse_id in multiverse_ids:
+        params = urllib.parse.urlencode({"mtg_multiverseid" : multiverse_id})
+        parser.feed(urllib.request.urlopen(GOODGAMES_API + "?%s" % params).read().decode("utf-8"))
+
+    # add the pricing data
+    card["prices"] = {
+        "scryfall" : {
+            "aud" : scryfall_prices[-1],
+            "instock" : True # scryfall doesn't track stock, so always assume it's in stock.
+        },
+        "goodgames" : {
+            "aud" : parser.price,
+            "instock" : parser.is_instock
+        }
     }
 
-    if args.verbose:
-        print("Fetched: " + card["name"])
     # scryfall is a public api and will blacklist IPs if they're requesting too frequently.
     time.sleep(1/10)
 
 # define a monsterous commpare function for sorting
 def compare(card):
-    if card["prices"]["goodgames"]["aud"] is None:
-        return float(card["prices"]["goodgames"]["usd"]) if card["prices"]["goodgames"]["usd"] is not None else 0
-    elif card["prices"]["tcgplayer"]["usd"] is None:
-        return float(card["prices"]["goodgames"]["aud"]) if card["prices"]["goodgames"]["aud"] is not None else 0
-    else:
-        return float(card["prices"]["goodgames"]["aud"]) - float(card["prices"]["tcgplayer"]["aud"])
+    return float(card["prices"]["goodgames"]["aud"]) - float(card["prices"]["scryfall"]["aud"])
 
 WISHLIST_CARDS.sort(key=compare)
 for card in WISHLIST_CARDS:
@@ -73,10 +77,9 @@ for card in WISHLIST_CARDS:
     print(card["name"] + ":")
     for vendor in card["prices"]:
         print(vendor, end= ': ')
-        if card["prices"][vendor]["aud"] is None or card["prices"][vendor]["usd"] is None:
+        if card["prices"][vendor] is None:
             print("No price avail.")
         else:
-            print(card["prices"][vendor]["usd"], end=" USD ")
-            print(card["prices"][vendor]["aud"], end=" AUD ")
+            print(card["prices"][vendor], end=" AUD ")
             print()
     print()
