@@ -8,7 +8,8 @@ args = parser.parse_args()
 import time
 import urllib
 import requests
-from GoodGamesParser import GoodGamesParser
+from bs4 import BeautifulSoup
+from bs4 import NavigableString
 
 # define some API endpoints
 SCRYFALL_API    = "https://api.scryfall.com/cards/"
@@ -44,23 +45,29 @@ for card in WISHLIST_CARDS:
     if args.verbose:
         print("\tFound:\t\t%s" % oracle_id)
         print("\tPrintings:\t%s" % multiverse_ids)
-        print("\tPrices:\t\t%s" % scryfall_prices)
+        print("\tSF Prices:\t%s" % scryfall_prices)
 
     # fetch good games data
-    parser = GoodGamesParser()
+    goodgames_prices = []
     for multiverse_id in multiverse_ids:
-        params = urllib.parse.urlencode({"mtg_multiverseid" : multiverse_id})
-        parser.feed(urllib.request.urlopen(GOODGAMES_API + "?%s" % params).read().decode("utf-8"))
+        soup = BeautifulSoup(urllib.request.urlopen(GOODGAMES_API + "?%s" % urllib.parse.urlencode({"mtg_multiverseid" : multiverse_id})).read().decode("utf-8"), features="html.parser")
+        for tag in soup.ol.descendants:
+            if not isinstance(tag, NavigableString) and tag.has_attr("data-price-amount"):
+                goodgames_prices.append(float(tag["data-price-amount"]))
+
+    goodgames_prices.sort()
+    goodgames_prices.reverse()
+
+    if args.verbose:
+        print("\tGG Prices:\t%s" % goodgames_prices)
 
     # add the pricing data
     card["prices"] = {
         "scryfall" : {
-            "aud" : scryfall_prices[-1],
-            "instock" : True # scryfall doesn't track stock, so always assume it's in stock.
+            "aud" : scryfall_prices[-1]
         },
         "goodgames" : {
-            "aud" : parser.price,
-            "instock" : parser.is_instock
+            "aud" : goodgames_prices[-1]
         }
     }
 
@@ -71,15 +78,12 @@ for card in WISHLIST_CARDS:
 def compare(card):
     return float(card["prices"]["goodgames"]["aud"]) - float(card["prices"]["scryfall"]["aud"])
 
+# sort the cards by the difference between scryfall and goodgames
 WISHLIST_CARDS.sort(key=compare)
+# then print 'em out
 for card in WISHLIST_CARDS:
-    # printing card information
     print(card["name"] + ":")
     for vendor in card["prices"]:
-        print(vendor, end= ': ')
-        if card["prices"][vendor] is None:
-            print("No price avail.")
-        else:
-            print(card["prices"][vendor], end=" AUD ")
-            print()
+        print("\t%s" % vendor, end= ': ')
+        print("\t$%s" % card["prices"][vendor]["aud"])
     print()
