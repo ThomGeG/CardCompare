@@ -1,8 +1,24 @@
 # define usage
+import sys
 import argparse
 parser = argparse.ArgumentParser()
-parser.add_argument("account_name", help="your deckbox.org account name", type=str)
-parser.add_argument("-v", "--verbose", help="increase output verbosity", action="store_true")
+parser.add_argument("input",
+    help="input file path for file; deckbox.org account name for wishlist",
+    type=str)
+parser.add_argument("-v", "--verbose",
+    action="store_true",
+    help="increase output verbosity")
+parser.add_argument("--source",
+    default='wishlist',
+    choices=['wishlist', 'file'],
+    help="the type of source for your cards",
+    nargs='?',
+    type=str)
+parser.add_argument('outstream',
+    default=sys.stdout,
+    help="file location to store results in",
+    nargs='?',
+    type=argparse.FileType('w'))
 args = parser.parse_args()
 
 import time
@@ -15,22 +31,31 @@ from bs4 import NavigableString
 SCRYFALL_API    = "https://api.scryfall.com/cards/"
 CURRENCY_API    = "https://api.exchangeratesapi.io/latest"
 GOODGAMES_API   = "https://tcg.goodgames.com.au/catalogsearch/advanced/result/"
-DECKBOX_API     = "https://deckbox-api.herokuapp.com/api/users/%s/wishlist" % args.account_name
+DECKBOX_API     = "https://deckbox-api.herokuapp.com/api/users/%s/wishlist" % args.input
 
 # define the conversion rate of USD -> AUD
 CONVERSION_RATE = requests.get(CURRENCY_API, params={"base" : "USD"}).json()["rates"]["AUD"]
 if args.verbose:
+    print("Input:\t\t" + args.input)
+    print("Input Type:\t" + args.source)
+    print("Output:\t\t"+ str(args.outstream))
     print("\nCurrent conversion rate (USD -> AUD): %s\n" % CONVERSION_RATE)
 
 # retrieve cards from wishlist on deckbox.org
-WISHLIST_CARDS = []
-for i in range(requests.get(DECKBOX_API).json()["total_pages"]):
-    wishlist_page = requests.get(DECKBOX_API, params={"page": i+1}).json()
-    for card in wishlist_page["items"]:
-        WISHLIST_CARDS.append({"name": card["name"]})
+CARDS = []
+if args.source == "file":
+    for line in open(args.input, "r"):
+        CARDS.append({"name" : line.strip()})
+elif args.source == "wishlist":
+    for i in range(requests.get(DECKBOX_API).json()["total_pages"]):
+        wishlist_page = requests.get(DECKBOX_API, params={"page": i+1}).json()
+        for card in wishlist_page["items"]:
+            CARDS.append({"name": card["name"]})
+
+
 
 # fetch pricing data from scryfall and good games
-for card in WISHLIST_CARDS:
+for card in CARDS:
 
     print("Fetching: %s" % card["name"])
 
@@ -79,11 +104,10 @@ def compare(card):
     return float(card["prices"]["goodgames"]["aud"]) - float(card["prices"]["scryfall"]["aud"])
 
 # sort the cards by the difference between scryfall and goodgames
-WISHLIST_CARDS.sort(key=compare)
+CARDS.sort(key=compare)
 # then print 'em out
-for card in WISHLIST_CARDS:
-    print(card["name"] + ":")
+for card in CARDS:
+    args.outstream.write(card["name"] + ":\n")
     for vendor in card["prices"]:
-        print("\t%s" % vendor, end= ': ')
-        print("\t$%s" % card["prices"][vendor]["aud"])
-    print()
+        args.outstream.write("\t%s:\t%s AUD\n" % (vendor, card["prices"][vendor]["aud"]))
+    args.outstream.write("\n")
