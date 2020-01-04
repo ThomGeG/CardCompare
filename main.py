@@ -21,6 +21,7 @@ parser.add_argument('outstream',
     type=argparse.FileType('w'))
 args = parser.parse_args()
 
+import re
 import time
 import urllib
 import requests
@@ -60,25 +61,44 @@ for card in CARDS:
     print("Fetching: %s" % card["name"])
 
     # fetch scryfall data
-    oracle_id = requests.get(SCRYFALL_API + "named", params={"exact" : card["name"]}).json()["oracle_id"]
-    scryfall_cards = requests.get(SCRYFALL_API + "search", params={"q" : "oracleid:" + oracle_id, "order" : "usd", "unique" : "prints"}).json()["data"]
+    card["oracle_id"] = requests.get(SCRYFALL_API + "named", params={"exact" : card["name"]}).json()["oracle_id"]
+    scryfall_cards = requests.get(SCRYFALL_API + "search", params={"q" : "oracleid:" + card["oracle_id"], "order" : "usd", "unique" : "prints"}).json()["data"]
 
-    # do some post-processing
-    multiverse_ids = [id for sublist in [card["multiverse_ids"] for card in scryfall_cards] for id in sublist]
+    # fetch some multiverse ids for later
+    card["multiverse_ids"]= [id for sublist in [card["multiverse_ids"] for card in scryfall_cards] for id in sublist]
+
+    # process foil and non-foil prices into single flat list
     scryfall_prices = [round(float(scryfall_card["prices"]["usd"]) * CONVERSION_RATE, 2) for scryfall_card in scryfall_cards if scryfall_card["prices"]["usd"] is not None]
+    scryfall_prices.extend([round(float(scryfall_card["prices"]["usd_foil"]) * CONVERSION_RATE, 2) for scryfall_card in scryfall_cards if scryfall_card["prices"]["usd_foil"] is not None])
+    scryfall_prices.sort()
+    scryfall_prices.reverse()
 
     if args.verbose:
-        print("\tFound:\t\t%s" % oracle_id)
-        print("\tPrintings:\t%s" % multiverse_ids)
+        print("\tFound:\t\t%s" % card["oracle_id"])
+        print("\tPrintings:\t%s" % card["multiverse_ids"])
         print("\tSF Prices:\t%s" % scryfall_prices)
 
     # fetch good games data
     goodgames_prices = []
-    for multiverse_id in multiverse_ids:
+    for multiverse_id in card["multiverse_ids"]:
         soup = BeautifulSoup(urllib.request.urlopen(GOODGAMES_API + "?%s" % urllib.parse.urlencode({"mtg_multiverseid" : multiverse_id})).read().decode("utf-8"), features="html.parser")
-        for tag in soup.ol.descendants:
-            if not isinstance(tag, NavigableString) and tag.has_attr("data-price-amount"):
-                goodgames_prices.append(float(tag["data-price-amount"]))
+
+        # process html; GG doesn't have public API :(
+        name = None
+        price = None
+        in_stock = True
+        for li in soup.ol.children:
+            if isinstance(li, NavigableString): # ignore empty strings
+                continue
+            for desc in li.descendants:
+                if not isinstance(desc, NavigableString) and desc.has_attr('class') and 'product-item-link' in desc['class']:
+                    name = str(desc.text).strip()
+                if not isinstance(desc, NavigableString) and desc.has_attr('data-price-amount'):
+                    price = float(desc["data-price-amount"])
+                if not isinstance(desc, NavigableString) and desc.has_attr('class') and 'stock' in desc['class']:
+                    in_stock = False
+        if name.startswith(card['name']):
+            goodgames_prices.append(price)
 
     goodgames_prices.sort()
     goodgames_prices.reverse()
