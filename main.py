@@ -42,18 +42,16 @@ if args.verbose:
     print("Output:\t\t"+ str(args.outstream))
     print("\nCurrent conversion rate (USD -> AUD): %s\n" % CONVERSION_RATE)
 
-# retrieve cards from wishlist on deckbox.org
+# retrieve cards..
 CARDS = []
-if args.source == "file":
+if args.source == "file": # ..from source input file
     for line in open(args.input, "r"):
         CARDS.append({"name" : line.strip()})
-elif args.source == "wishlist":
+elif args.source == "wishlist": # ..from deckbox.org wishlist
     for i in range(requests.get(DECKBOX_API).json()["total_pages"]):
         wishlist_page = requests.get(DECKBOX_API, params={"page": i+1}).json()
         for card in wishlist_page["items"]:
             CARDS.append({"name": card["name"]})
-
-
 
 # fetch pricing data from scryfall and good games
 for card in CARDS:
@@ -64,10 +62,10 @@ for card in CARDS:
     card["oracle_id"] = requests.get(SCRYFALL_API + "named", params={"exact" : card["name"]}).json()["oracle_id"]
     scryfall_cards = requests.get(SCRYFALL_API + "search", params={"q" : "oracleid:" + card["oracle_id"], "order" : "usd", "unique" : "prints"}).json()["data"]
 
-    # fetch some multiverse ids for later
-    card["multiverse_ids"]= [id for sublist in [card["multiverse_ids"] for card in scryfall_cards] for id in sublist]
+    # extract each printings multiverse ids
+    card["multiverse_ids"] = [id for sublist in [card["multiverse_ids"] for card in scryfall_cards] for id in sublist]
 
-    # process foil and non-foil prices into single flat list
+    # process non-foil and foil prices into single flat list
     scryfall_prices = [round(float(scryfall_card["prices"]["usd"]) * CONVERSION_RATE, 2) for scryfall_card in scryfall_cards if scryfall_card["prices"]["usd"] is not None]
     scryfall_prices.extend([round(float(scryfall_card["prices"]["usd_foil"]) * CONVERSION_RATE, 2) for scryfall_card in scryfall_cards if scryfall_card["prices"]["usd_foil"] is not None])
     scryfall_prices.sort()
@@ -81,9 +79,9 @@ for card in CARDS:
     # fetch good games data
     goodgames_prices = []
     for multiverse_id in card["multiverse_ids"]:
+        # retrieve HTML from store page search for multiverse id.. GG don't have a plublic API :(
         soup = BeautifulSoup(urllib.request.urlopen(GOODGAMES_API + "?%s" % urllib.parse.urlencode({"mtg_multiverseid" : multiverse_id})).read().decode("utf-8"), features="html.parser")
 
-        # process html; GG doesn't have public API :(
         name = None
         price = None
         in_stock = True
@@ -91,13 +89,15 @@ for card in CARDS:
             if isinstance(li, NavigableString): # ignore empty strings
                 continue
             for desc in li.descendants:
-                if not isinstance(desc, NavigableString) and desc.has_attr('class') and 'product-item-link' in desc['class']:
-                    name = str(desc.text).strip()
-                if not isinstance(desc, NavigableString) and desc.has_attr('data-price-amount'):
-                    price = float(desc["data-price-amount"])
-                if not isinstance(desc, NavigableString) and desc.has_attr('class') and 'stock' in desc['class']:
-                    in_stock = False
+                if not isinstance(desc, NavigableString):
+                    if desc.has_attr('class') and 'product-item-link' in desc['class']:
+                        name = str(desc.text).strip()
+                    if desc.has_attr('data-price-amount'):
+                        price = float(desc["data-price-amount"])
+                    if desc.has_attr('class') and 'stock' in desc['class']:
+                        in_stock = False
         if name.startswith(card['name']):
+            # TODO add logic for cards not in stock
             goodgames_prices.append(price)
 
     goodgames_prices.sort()
