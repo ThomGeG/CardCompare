@@ -85,6 +85,11 @@ for card in CARDS:
         name = None
         price = None
         in_stock = True
+
+        # skip printings that GG doesn't have
+        if soup.ol is None:
+            continue
+
         for li in soup.ol.children:
             if isinstance(li, NavigableString): # ignore empty strings
                 continue
