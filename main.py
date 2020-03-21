@@ -14,6 +14,11 @@ parser.add_argument("--source",
     help="the type of source for your cards",
     nargs='?',
     type=str)
+parser.add_argument("--rate",
+    default=None,
+    help="the exchange rate of USD -> AUD",
+    nargs='?',
+    type=float)
 parser.add_argument('outstream',
     default=sys.stdout,
     help="file location to store results in",
@@ -34,8 +39,9 @@ CURRENCY_API    = "https://api.exchangeratesapi.io/latest"
 GOODGAMES_API   = "https://tcg.goodgames.com.au/catalogsearch/advanced/result/"
 DECKBOX_API     = "https://deckbox-api.herokuapp.com/api/users/%s/wishlist" % args.input
 
-# define the conversion rate of USD -> AUD
-CONVERSION_RATE = requests.get(CURRENCY_API, params={"base" : "USD"}).json()["rates"]["AUD"]
+# define the conversion rate of USD -> AUD (use from commandline if provided)
+CONVERSION_RATE = args.rate or requests.get(CURRENCY_API, params={"base" : "USD"}).json()["rates"]["AUD"]
+
 if args.verbose:
     print("Input:\t\t" + args.input)
     print("Input Type:\t" + args.source)
