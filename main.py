@@ -27,6 +27,7 @@ parser.add_argument('outstream',
 args = parser.parse_args()
 
 import re
+import csv
 import time
 import urllib
 import requests
@@ -37,7 +38,8 @@ from bs4 import NavigableString
 SCRYFALL_API    = "https://api.scryfall.com/cards/"
 CURRENCY_API    = "https://api.exchangeratesapi.io/latest"
 GOODGAMES_API   = "https://tcg.goodgames.com.au/catalogsearch/advanced/result/"
-DECKBOX_API     = "https://deckbox-api.herokuapp.com/api/users/%s/wishlist" % args.input
+SETS_API        = "https://deckbox-api.herokuapp.com/api/users/%s/sets" % args.input
+DECKBOX_API     = "https://deckbox.org/sets/export/%s?format=csv&columns=Type" % list(filter(lambda x: x["name"] == 'wishlist', requests.get(SETS_API).json()["items"]))[0]["id"]
 
 # define the conversion rate of USD -> AUD (use from commandline if provided)
 CONVERSION_RATE = args.rate or requests.get(CURRENCY_API, params={"base" : "USD"}).json()["rates"]["AUD"]
@@ -54,10 +56,8 @@ if args.source == "file": # ..from source input file
     for line in open(args.input, "r"):
         CARDS.append({"name" : line.strip()})
 elif args.source == "wishlist": # ..from deckbox.org wishlist
-    for i in range(requests.get(DECKBOX_API).json()["total_pages"]):
-        wishlist_page = requests.get(DECKBOX_API, params={"page": i+1}).json()
-        for card in wishlist_page["items"]:
-            CARDS.append({"name": card["name"]})
+    for card in [dict(x) for x in csv.DictReader(requests.get(DECKBOX_API).text.split('\n'))]:
+        CARDS.append({"name": card["Name"]})
 
 # fetch pricing data from scryfall and good games
 for card in CARDS:
