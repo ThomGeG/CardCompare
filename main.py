@@ -26,18 +26,20 @@ parser.add_argument('outstream',
     type=argparse.FileType('w'))
 args = parser.parse_args()
 
+import os
 import re
 import csv
+import json
 import time
 import urllib
 import requests
-from bs4 import BeautifulSoup
-from bs4 import NavigableString
+from functools import reduce
+
+os.system("") # magic to get ANSI codes working
 
 # define some API endpoints
 SCRYFALL_API    = "https://api.scryfall.com/cards/"
 CURRENCY_API    = "https://api.exchangeratesapi.io/latest"
-GOODGAMES_API   = "https://tcg.goodgames.com.au/catalogsearch/advanced/result/"
 SETS_API        = "https://deckbox-api.herokuapp.com/api/users/%s/sets" % args.input
 DECKBOX_API     = "https://deckbox.org/sets/export/%s?format=csv&columns=Type" % list(filter(lambda x: x["name"] == 'wishlist', requests.get(SETS_API).json()["items"]))[0]["id"]
 
@@ -75,7 +77,6 @@ for card in CARDS:
     scryfall_prices = [round(float(scryfall_card["prices"]["usd"]) * CONVERSION_RATE, 2) for scryfall_card in scryfall_cards if scryfall_card["prices"]["usd"] is not None]
     scryfall_prices.extend([round(float(scryfall_card["prices"]["usd_foil"]) * CONVERSION_RATE, 2) for scryfall_card in scryfall_cards if scryfall_card["prices"]["usd_foil"] is not None])
     scryfall_prices.sort()
-    scryfall_prices.reverse()
 
     if args.verbose:
         print("\tFound:\t\t%s" % card["oracle_id"])
@@ -85,45 +86,40 @@ for card in CARDS:
     # fetch good games data
     goodgames_prices = []
     for multiverse_id in card["multiverse_ids"]:
-        # retrieve HTML from store page search for multiverse id.. GG don't have a plublic API :(
-        soup = BeautifulSoup(urllib.request.urlopen(GOODGAMES_API + "?%s" % urllib.parse.urlencode({"mtg_multiverseid" : multiverse_id})).read().decode("utf-8"), features="html.parser")
+        # hit the API directly
+        response = requests.post(
+            "https://wf19vv0nsf-dsn.algolia.net/1/indexes/*/queries",
+            data=json.dumps({"requests" : [{
+                "indexName": "magento2_tcg_productiondefault_products",
+                "params": "query=%s" % multiverse_id
+            }]}),
+            params={
+                "x-algolia-application-id" : "WF19VV0NSF",
+                "x-algolia-api-key" : "MDdmNjA0Mjc1YzRkZjI4MWMwZmQyMDI4MDc5NDY4ZjlkYzJmOTVmMWY5Yjc3MGFkNDRiODA4YjU0MDVlM2Q1YnRhZ0ZpbHRlcnM9"
+            },
+            headers={
+                "Referer" : "https://tcg.goodgames.com.au/"
+            }
+        ).json()["results"][0]
 
-        name = None
-        price = None
-        in_stock = True
+         # todo
+        if len(response["hits"]) >= 0:
+            for hit in response["hits"]:
+                goodgames_prices.append((hit["price"]["AUD"]["default"], hit["stock_qty"]))
+        else:
+            print("\tNo listings found for %s (%s)" %(multiverse_id, card["name"]))
 
-        # skip printings that GG doesn't have
-        if soup.ol is None:
-            continue
-
-        for li in soup.ol.children:
-            if isinstance(li, NavigableString): # ignore empty strings
-                continue
-            for desc in li.descendants:
-                if not isinstance(desc, NavigableString):
-                    if desc.has_attr('class') and 'product-item-link' in desc['class']:
-                        name = str(desc.text).strip()
-                    if desc.has_attr('data-price-amount'):
-                        price = float(desc["data-price-amount"])
-                    if desc.has_attr('class') and 'stock' in desc['class']:
-                        in_stock = False
-        if name.startswith(card['name']):
-            # TODO add logic for cards not in stock
-            goodgames_prices.append(price)
-
-    goodgames_prices.sort()
-    goodgames_prices.reverse()
-
+    goodgames_prices.sort(key=lambda x: x[0])
     if args.verbose:
-        print("\tGG Prices:\t%s" % goodgames_prices)
+        print("\tGG Prices:\t[%s]" % reduce(lambda s, pair: s + "%s%s\033[0m, " % ('\033[92m' if pair[1] > 0 else '\033[91m', pair[0]), goodgames_prices, "")[:-2])
 
     # add the pricing data
     card["prices"] = {
         "scryfall" : {
-            "aud" : scryfall_prices[-1]
+            "aud" : scryfall_prices
         },
         "goodgames" : {
-            "aud" : goodgames_prices[-1]
+            "aud" : goodgames_prices
         }
     }
 
@@ -131,11 +127,11 @@ for card in CARDS:
     time.sleep(1/10)
 
 # define a monsterous commpare function for sorting
-def compare(card):
-    return float(card["prices"]["goodgames"]["aud"]) - float(card["prices"]["scryfall"]["aud"])
+#def compare(card):
+    #return (float(card["prices"]["goodgames"]["aud"][-1]) or sys.maxint) - (float(card["prices"]["scryfall"]["aud"][-1]) or sys.minint)
 
 # sort the cards by the difference between scryfall and goodgames
-CARDS.sort(key=compare)
+#CARDS.sort(key=compare)
 # then print 'em out
 for card in CARDS:
     args.outstream.write(card["name"] + ":\n")

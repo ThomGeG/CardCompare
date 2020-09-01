@@ -9,5 +9,5 @@ setup(
     packages=find_packages(),
 
     python_requires='>=3.5',
-    install_requires=['requests', "beautifulsoup4"],
+    install_requires=['requests'],
 )
