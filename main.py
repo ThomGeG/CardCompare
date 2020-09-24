@@ -85,29 +85,27 @@ for card in CARDS:
 
     # fetch good games data
     goodgames_prices = []
-    for multiverse_id in card["multiverse_ids"]:
-        # hit the API directly
-        response = requests.post(
-            "https://wf19vv0nsf-dsn.algolia.net/1/indexes/*/queries",
-            data=json.dumps({"requests" : [{
-                "indexName": "magento2_tcg_productiondefault_products",
-                "params": "query=%s" % multiverse_id
-            }]}),
-            params={
-                "x-algolia-application-id" : "WF19VV0NSF",
-                "x-algolia-api-key" : "MDdmNjA0Mjc1YzRkZjI4MWMwZmQyMDI4MDc5NDY4ZjlkYzJmOTVmMWY5Yjc3MGFkNDRiODA4YjU0MDVlM2Q1YnRhZ0ZpbHRlcnM9"
-            },
-            headers={
-                "Referer" : "https://tcg.goodgames.com.au/"
-            }
-        ).json()["results"][0]
 
-         # todo
-        if len(response["hits"]) >= 0:
-            for hit in response["hits"]:
+    # hit the API directly
+    response = requests.post(
+        "https://wf19vv0nsf-dsn.algolia.net/1/indexes/*/queries",
+        data=json.dumps({"requests" : [{
+            "indexName": "magento2_tcg_productiondefault_products",
+            "params": "query=%s" % card["name"]
+        }]}),
+        params={
+            "x-algolia-application-id" : "WF19VV0NSF",
+            "x-algolia-api-key" : "MDdmNjA0Mjc1YzRkZjI4MWMwZmQyMDI4MDc5NDY4ZjlkYzJmOTVmMWY5Yjc3MGFkNDRiODA4YjU0MDVlM2Q1YnRhZ0ZpbHRlcnM9"
+        },
+        headers={
+            "Referer" : "https://tcg.goodgames.com.au/"
+        }
+    ).json()["results"][0]
+
+    if len(response["hits"]) >= 0:
+        for hit in response["hits"]:
+            if ("mtg_multiverseid" in hit and hit["mtg_multiverseid"] in card["multiverse_ids"]) or re.compile("^%s (- Foil )?\(.+\)$" % re.escape(card["name"])).match(hit["name"]):
                 goodgames_prices.append((hit["price"]["AUD"]["default"], hit["stock_qty"]))
-        else:
-            print("\tNo listings found for %s (%s)" %(multiverse_id, card["name"]))
 
     goodgames_prices.sort(key=lambda x: x[0])
     if args.verbose:
@@ -125,16 +123,3 @@ for card in CARDS:
 
     # scryfall is a public api and will blacklist IPs if they're requesting too frequently.
     time.sleep(1/10)
-
-# define a monsterous commpare function for sorting
-#def compare(card):
-    #return (float(card["prices"]["goodgames"]["aud"][-1]) or sys.maxint) - (float(card["prices"]["scryfall"]["aud"][-1]) or sys.minint)
-
-# sort the cards by the difference between scryfall and goodgames
-#CARDS.sort(key=compare)
-# then print 'em out
-for card in CARDS:
-    args.outstream.write(card["name"] + ":\n")
-    for vendor in card["prices"]:
-        args.outstream.write("\t%s:\t%s AUD\n" % (vendor, card["prices"][vendor]["aud"]))
-    args.outstream.write("\n")
