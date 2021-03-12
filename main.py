@@ -38,6 +38,7 @@ from functools import reduce
 os.system("") # magic to get ANSI codes working
 
 # define some API endpoints
+GG_API          = "https://appbeta.binderpos.com/external/shopify/products/forStore"
 SCRYFALL_API    = "https://api.scryfall.com/cards/"
 CURRENCY_API    = "https://api.exchangeratesapi.io/latest"
 SETS_API        = "https://deckbox-api.herokuapp.com/api/users/%s/sets" % args.input
@@ -88,24 +89,21 @@ for card in CARDS:
 
     # hit the API directly
     response = requests.post(
-        "https://wf19vv0nsf-dsn.algolia.net/1/indexes/*/queries",
-        data=json.dumps({"requests" : [{
-            "indexName": "magento2_tcg_productiondefault_products",
-            "params": "query=%s" % card["name"]
-        }]}),
-        params={
-            "x-algolia-application-id" : "WF19VV0NSF",
-            "x-algolia-api-key" : "MDdmNjA0Mjc1YzRkZjI4MWMwZmQyMDI4MDc5NDY4ZjlkYzJmOTVmMWY5Yjc3MGFkNDRiODA4YjU0MDVlM2Q1YnRhZ0ZpbHRlcnM9"
-        },
+        GG_API,
+        data=json.dumps({
+            "storeUrl" : "good-games-townhall.myshopify.com",
+            "title" : card["name"]
+        }),
         headers={
-            "Referer" : "https://tcg.goodgames.com.au/"
+            "content-type": "application/json; charset=UTF-8"
         }
-    ).json()["results"][0]
+    ).json()
 
-    if len(response["hits"]) >= 0:
-        for hit in response["hits"]:
-            if ("mtg_multiverseid" in hit and hit["mtg_multiverseid"] in card["multiverse_ids"]) or re.compile("^%s (- Foil )?\(.+\)$" % re.escape(card["name"])).match(hit["name"]):
-                goodgames_prices.append((hit["price"]["AUD"]["default"], hit["stock_qty"]))
+    if len(response["products"]) >= 0:
+        for hit in response["products"]:
+            if re.compile("^%s( \(.+\))?( \[.+\])?$" % re.escape(card["name"])).match(hit["title"]):
+                for variant in hit["variants"]:
+                    goodgames_prices.append((variant["price"], variant["quantity"] > 0))
 
     goodgames_prices.sort(key=lambda x: x[0])
     if args.verbose:
